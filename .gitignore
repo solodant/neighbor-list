@@ -1,0 +1,5 @@
+test_nl
+*.o
+*.out
+*.vscode/
+*~
