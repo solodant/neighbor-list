@@ -1,9 +1,37 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
 #include "neighbor_list.h"
 
-NeighborList compute_neighbor_list(const double *position, int N, double cutoff) {
+
+CutoffSpec cutoff_global(double value) {
+    CutoffSpec spec;
+    spec.type = CUTOFF_GLOBAL;
+    spec.data.global = value;
+    return spec;
+}
+
+
+CutoffSpec cutoff_per_atom(const double *values) {
+    CutoffSpec spec;
+    spec.type = CUTOFF_PER_ATOM;
+    spec.data.per_atom = values;  
+    return spec;
+}
+
+
+static double get_cutoff_sum(const CutoffSpec *spec, int i, int j) {
+    switch (spec->type) {
+        case CUTOFF_GLOBAL:
+            return spec->data.global; 
+        
+        case CUTOFF_PER_ATOM:
+            return spec->data.per_atom[i] + spec->data.per_atom[j];
+    }
+    return 0.0;
+}
+
+
+NeighborList compute_neighbor_list(const double *position, int N, const CutoffSpec *cutoff_spec) {
     NeighborList nl;
     nl.pairs = NULL;
     nl.count = 0;
@@ -22,8 +50,9 @@ NeighborList compute_neighbor_list(const double *position, int N, double cutoff)
             double dz = zi - position[3*j+2];
 
             double dist = dx*dx + dy*dy + dz*dz;
+            double cutoff_sum = get_cutoff_sum(cutoff_spec, i, j);
 
-            if (dist <= cutoff*cutoff) {
+            if (dist <= cutoff_sum*cutoff_sum) {
                 count++;
             }
         }
@@ -54,8 +83,9 @@ NeighborList compute_neighbor_list(const double *position, int N, double cutoff)
             double dz = zi - position[3*j+2];
 
             double dist = dx*dx + dy*dy + dz*dz;
+            double cutoff_sum = get_cutoff_sum(cutoff_spec, i, j);
             
-            if (dist <= cutoff*cutoff) {
+            if (dist <= cutoff_sum*cutoff_sum) {
                 nl.pairs[idx].i = i;
                 nl.pairs[idx].j = j;
                 idx++;
