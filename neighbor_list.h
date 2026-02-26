@@ -32,7 +32,18 @@ CutoffSpec cutoff_global(double value);
 CutoffSpec cutoff_per_atom(const double *values);
 
 
-NeighborList compute_neighbor_list(const double *positions, int N, const CutoffSpec *cutoff_spec);
+typedef struct {
+    const CutoffSpec *cutoff_spec;
+    int self_interaction;
+} NeighborListConfig;
+
+
+
+NeighborList primitive_neighbor_list(
+    const double *positions,
+    int N,
+    const NeighborListConfig *config
+);
 
 
 void free_neighbor_list(NeighborList *nl);

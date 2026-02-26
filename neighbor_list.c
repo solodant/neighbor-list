@@ -31,12 +31,19 @@ static double get_cutoff_sum(const CutoffSpec *spec, int i, int j) {
 }
 
 
-NeighborList compute_neighbor_list(const double *position, int N, const CutoffSpec *cutoff_spec) {
+NeighborList primitive_neighbor_list(const double *position, int N, const NeighborListConfig *config) {
     NeighborList nl;
     nl.pairs = NULL;
     nl.count = 0;
 
+    const CutoffSpec *cutoff_spec = config->cutoff_spec;
+    int self_interaction = config->self_interaction;
+
     int count = 0;
+
+    if (self_interaction) {
+        count += N;  
+    }
 
     for (int i = 0; i < N; i++) {
 
@@ -71,6 +78,15 @@ NeighborList compute_neighbor_list(const double *position, int N, const CutoffSp
 
 
     int idx = 0;
+
+    if (self_interaction) {
+        for (int i = 0; i < N; i++) {
+            nl.pairs[idx].i = i;
+            nl.pairs[idx].j = i;
+            idx++;
+        }
+    }
+
     for (int i = 0; i < N; i++) {
 
         double xi = position[3*i];
