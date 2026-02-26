@@ -1,4 +1,5 @@
 test_nl
+main.c
 *.o
 *.out
 *.vscode/
