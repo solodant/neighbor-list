@@ -38,6 +38,7 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
 
     const CutoffSpec *cutoff_spec = config->cutoff_spec;
     int self_interaction = config->self_interaction;
+    int bothways = config->bothways;
 
     int count = 0;
 
@@ -60,7 +61,11 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
             double cutoff_sum = get_cutoff_sum(cutoff_spec, i, j);
 
             if (dist <= cutoff_sum*cutoff_sum) {
-                count++;
+                if (bothways) {
+                    count += 2;
+                } else {
+                    count += 1;
+                }
             }
         }
     }
@@ -105,7 +110,14 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
                 nl.pairs[idx].i = i;
                 nl.pairs[idx].j = j;
                 idx++;
+
+                if (bothways) {
+                    nl.pairs[idx].i = j;
+                    nl.pairs[idx].j = i;
+                    idx++;
+                }
             }
+
         }
     }
 

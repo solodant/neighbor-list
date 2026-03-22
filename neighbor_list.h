@@ -35,6 +35,7 @@ CutoffSpec cutoff_per_atom(const double *values);
 typedef struct {
     const CutoffSpec *cutoff_spec;
     int self_interaction;
+    int bothways;
 } NeighborListConfig;
 
 
