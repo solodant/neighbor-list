@@ -142,6 +142,165 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
 }
 
 
+NeighborListObject* neighborlist_create(const double *cutoffs, int natoms, int self_interaction, int bothways) {
+
+    NeighborListObject *nl = (NeighborListObject*)malloc(sizeof(NeighborListObject));
+    if (nl == NULL) {
+        return NULL;
+    }
+
+    nl->cutoffs = (double*)malloc(natoms * sizeof(double));
+    if (nl->cutoffs == NULL) {
+        free(nl);
+        return NULL;
+    }
+    for (int i = 0; i < natoms; i++) {
+        nl->cutoffs[i] = cutoffs[i];
+    }
+
+
+    nl->natoms = natoms;
+    nl->self_interaction = self_interaction;
+    nl->bothways = bothways;
+    nl->cached_nl = NULL;
+    nl->nupdates = 0;
+    nl->last_positions = NULL;
+
+
+    for (int i = 0; i < 3; i++) {
+        nl->last_pbc[i] = 0;
+    }
+    for (int i = 0; i < 9; i++) {
+        nl->last_cell[i] = (i % 4 == 0) ? 1.0 : 0.0;  
+    }
+    
+
+    return nl;
+}
+
+
+void neighborlist_free(NeighborListObject *nl) {
+    if (nl == NULL) return;
+    
+    if (nl->cutoffs != NULL) {
+        free(nl->cutoffs);
+    }
+    
+    if (nl->cached_nl != NULL) {
+        free_neighbor_list(nl->cached_nl);
+        free(nl->cached_nl);
+    }
+
+    if (nl->last_positions != NULL) {
+        free(nl->last_positions);
+    }
+    
+    free(nl);
+}
+
+
+void neighborlist_update(NeighborListObject *nl, const double *positions, const int *pbc, const double *cell) {
+    if (nl == NULL) {
+        return;
+    }
+
+
+    CutoffSpec cutoff_spec = cutoff_per_atom(nl->cutoffs);
+
+
+    NeighborListConfig config = {
+        .cutoff_spec = &cutoff_spec,
+        .self_interaction = nl->self_interaction,
+        .bothways = nl->bothways,
+        .pbc = {pbc[0], pbc[1], pbc[2]},
+        .cell = {cell[0], cell[1], cell[2], cell[3], cell[4], cell[5], cell[6], cell[7], cell[8]}
+    };
+
+
+    NeighborList new_nl = primitive_neighbor_list(positions, nl->natoms, &config);
+
+
+    if (nl->cached_nl != NULL) {
+        free_neighbor_list(nl->cached_nl);
+        free(nl->cached_nl);
+    }
+
+
+    nl->cached_nl = (NeighborList*)malloc(sizeof(NeighborList));
+    if (nl->cached_nl == NULL) {
+        return;
+    }
+    *nl->cached_nl = new_nl;
+
+
+    for (int i = 0; i < 3; i++) {
+        nl->last_pbc[i] = pbc[i];
+    }
+    for (int i = 0; i < 9; i++) {
+        nl->last_cell[i] = cell[i];
+    }
+
+
+    nl->nupdates++;
+}
+
+
+AtomNeighbors neighborlist_get_neighbors(NeighborListObject *nl, int atom) {
+    AtomNeighbors result;
+    result.indices = NULL;
+    result.count = 0;
+
+
+    if (nl == NULL || nl->cached_nl == NULL || nl->cached_nl->pairs == NULL) {
+        return result;
+    }
+
+    NeighborList *nlist = nl->cached_nl;
+
+
+    int count = 0;
+    for (int k = 0; k < nlist->count; k++) {
+        if (nlist->pairs[k].i == atom) {
+            count++;
+        }
+    }
+
+    if (count == 0) {
+        return result;
+    }
+
+
+    result.indices = (int*)malloc(count * sizeof(int));
+    if (result.indices == NULL) {
+        return result;
+    }
+    result.count = count;
+
+    int idx = 0;
+    for (int k = 0; k < nlist->count; k++) {
+        if (nlist->pairs[k].i == atom) {
+            result.indices[idx++] = nlist->pairs[k].j;
+        }
+    }
+
+    return result;
+}
+
+
+void atom_neighbors_free(AtomNeighbors *neighbors) {
+    if (neighbors->indices != NULL) {
+        free(neighbors->indices);
+        neighbors->indices = NULL;
+    }
+    neighbors->count = 0;
+}
+
+
+int neighborlist_get_nupdates(NeighborListObject *nl) {
+    return nl->nupdates;
+}
+
+
 void free_neighbor_list(NeighborList *nl) {
     if (nl->pairs != NULL) {
         free(nl->pairs);
@@ -149,6 +308,3 @@ void free_neighbor_list(NeighborList *nl) {
     }
     nl->count = 0;
 }
-
-
-

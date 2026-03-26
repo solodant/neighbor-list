@@ -51,5 +51,43 @@ NeighborList primitive_neighbor_list(
 void free_neighbor_list(NeighborList *nl);
 
 
+typedef struct {
+    int *indices;
+    int count;
+} AtomNeighbors;
+
+
+typedef struct {
+    double *cutoffs;
+    int natoms;
+    int self_interaction;
+    int bothways;
+
+
+    NeighborList *cached_nl;
+    int nupdates;
+
+
+    int last_pbc[3];
+    double last_cell[9];
+    double *last_positions;
+} NeighborListObject;
+
+
+NeighborListObject* neighborlist_create(const double *cutoffs, int natoms, int self_interaction, int bothways);
+
+AtomNeighbors neighborlist_get_neighbors(NeighborListObject *nl, int atom);
+
+
+int neighborlist_get_nupdates(NeighborListObject *nl);
+
+
+void neighborlist_update(NeighborListObject *nl, const double *positions, const int *pbc, const double *cell);
+
+void neighborlist_free(NeighborListObject *nl);
+
+void atom_neighbors_free(AtomNeighbors *neighbors);
+
+
 #endif
 
