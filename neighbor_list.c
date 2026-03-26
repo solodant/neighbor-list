@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include "neighbor_list.h"
 
 
@@ -31,6 +32,30 @@ static double get_cutoff_sum(const CutoffSpec *spec, int i, int j) {
 }
 
 
+static double distance_sq_pbc(int i, int j, const double *position, const int *pbc, const double *cell) {
+        double dx = position[3*i] - position[3*j];
+        double dy = position[3*i+1] - position[3*j+1];
+        double dz = position[3*i+2] - position[3*j+2]; 
+
+        if (pbc[0]) {
+            double Lx = cell[0];
+            dx -= round(dx / Lx) * Lx;
+        }
+
+        if (pbc[1]) {
+        double Ly = cell[4];  
+        dy -= round(dy / Ly) * Ly;
+        }   
+
+        if (pbc[2]) {
+        double Lz = cell[8];  
+        dz -= round(dz / Lz) * Lz;
+        }
+    
+    return dx*dx + dy*dy + dz*dz;
+}
+
+
 NeighborList primitive_neighbor_list(const double *position, int N, const NeighborListConfig *config) {
     NeighborList nl;
     nl.pairs = NULL;
@@ -39,6 +64,9 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
     const CutoffSpec *cutoff_spec = config->cutoff_spec;
     int self_interaction = config->self_interaction;
     int bothways = config->bothways;
+    const int *pbc = config->pbc;
+    const double *cell = config->cell;
+
 
     int count = 0;
 
@@ -48,16 +76,10 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
 
     for (int i = 0; i < N; i++) {
 
-        double xi = position[3*i];
-        double yi = position[3*i+1];
-        double zi = position[3*i+2];
-
         for (int j = i+1; j < N; j++){
-            double dx = xi - position[3*j];
-            double dy = yi - position[3*j+1];
-            double dz = zi - position[3*j+2];
 
-            double dist = dx*dx + dy*dy + dz*dz;
+            double dist = distance_sq_pbc(i, j, position, config->pbc, config->cell);
+
             double cutoff_sum = get_cutoff_sum(cutoff_spec, i, j);
 
             if (dist <= cutoff_sum*cutoff_sum) {
@@ -94,16 +116,10 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
 
     for (int i = 0; i < N; i++) {
 
-        double xi = position[3*i];
-        double yi = position[3*i+1];
-        double zi = position[3*i+2];
-
         for (int j = i+1; j < N; j++) {
-            double dx = xi - position[3*j];
-            double dy = yi - position[3*j+1];
-            double dz = zi - position[3*j+2];
 
-            double dist = dx*dx + dy*dy + dz*dz;
+            double dist = distance_sq_pbc(i, j, position, config->pbc, config->cell);
+
             double cutoff_sum = get_cutoff_sum(cutoff_spec, i, j);
             
             if (dist <= cutoff_sum*cutoff_sum) {

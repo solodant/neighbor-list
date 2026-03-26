@@ -36,8 +36,9 @@ typedef struct {
     const CutoffSpec *cutoff_spec;
     int self_interaction;
     int bothways;
+    int pbc[3];
+    double cell[9];
 } NeighborListConfig;
-
 
 
 NeighborList primitive_neighbor_list(
