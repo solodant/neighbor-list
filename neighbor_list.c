@@ -1,9 +1,22 @@
+/**
+ * @file neighbor_list.c
+ * @brief Implementation of neighbor list library
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include "neighbor_list.h"
 
-
+/**
+ * @brief Compare two pairs for sorting
+ * 
+ * Sorts by i first, then by j
+ * 
+ * @param a First pair
+ * @param b Second pair
+ * @return Negative if a < b, positive if a > b, zero if equal
+ */
 static int compare_pairs(const void *a, const void *b) {
     const Pair *pa = (const Pair*)a;
     const Pair *pb = (const Pair*)b;
@@ -11,7 +24,9 @@ static int compare_pairs(const void *a, const void *b) {
     return pa->j - pb->j;
 }
 
-
+/**
+ * @brief Create a global cutoff specification
+ */
 CutoffSpec cutoff_global(double value) {
     CutoffSpec spec;
     spec.type = CUTOFF_GLOBAL;
@@ -19,7 +34,9 @@ CutoffSpec cutoff_global(double value) {
     return spec;
 }
 
-
+/**
+ * @brief Create a per-atom cutoff specification
+ */
 CutoffSpec cutoff_per_atom(const double *values) {
     CutoffSpec spec;
     spec.type = CUTOFF_PER_ATOM;
@@ -27,44 +44,66 @@ CutoffSpec cutoff_per_atom(const double *values) {
     return spec;
 }
 
-
+/**
+ * @brief Get the cutoff sum for a pair of atoms
+ * 
+ * For global cutoff: returns cutoff (single value)
+ * For per-atom cutoff: returns r_i + r_j
+ * 
+ * @param spec Cutoff specification
+ * @param i First atom index
+ * @param j Second atom index
+ * @return Cutoff sum for distance comparison
+ */
 static double get_cutoff_sum(const CutoffSpec *spec, int i, int j) {
     switch (spec->type) {
         case CUTOFF_GLOBAL:
             return spec->data.global; 
-        
         case CUTOFF_PER_ATOM:
             return spec->data.per_atom[i] + spec->data.per_atom[j];
     }
     return 0.0;
 }
 
+/**
+ * @brief Compute squared distance with minimum image convention
+ * 
+ * Applies PBC correction for orthogonal cells only.
+ * 
+ * @param i First atom index
+ * @param j Second atom index
+ * @param positions Atomic coordinates
+ * @param pbc PBC flags (1=periodic)
+ * @param cell Unit cell matrix (orthogonal only)
+ * @return Squared distance after applying MIC
+ */
+static double distance_sq_pbc(int i, int j, const double *positions,
+                              const int *pbc, const double *cell) {
+    double dx = positions[3*i] - positions[3*j];
+    double dy = positions[3*i+1] - positions[3*j+1];
+    double dz = positions[3*i+2] - positions[3*j+2]; 
 
-static double distance_sq_pbc(int i, int j, const double *position, const int *pbc, const double *cell) {
-        double dx = position[3*i] - position[3*j];
-        double dy = position[3*i+1] - position[3*j+1];
-        double dz = position[3*i+2] - position[3*j+2]; 
-
-        if (pbc[0]) {
-            double Lx = cell[0];
-            dx -= round(dx / Lx) * Lx;
-        }
-
-        if (pbc[1]) {
+    if (pbc[0]) {
+        double Lx = cell[0];
+        dx -= round(dx / Lx) * Lx;
+    }
+    if (pbc[1]) {
         double Ly = cell[4];  
         dy -= round(dy / Ly) * Ly;
-        }   
-
-        if (pbc[2]) {
+    }   
+    if (pbc[2]) {
         double Lz = cell[8];  
         dz -= round(dz / Lz) * Lz;
-        }
+    }
     
     return dx*dx + dy*dy + dz*dz;
 }
 
-
-NeighborList primitive_neighbor_list(const double *position, int N, const NeighborListConfig *config) {
+/**
+ * @brief Core neighbor search implementation (O(N²))
+ */
+NeighborList primitive_neighbor_list(const double *positions, int natoms,
+                                     const NeighborListConfig *config) {
     NeighborList nl;
     nl.pairs = NULL;
     nl.count = 0;
@@ -75,22 +114,19 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
     const int *pbc = config->pbc;
     const double *cell = config->cell;
 
-
+    /* First pass: count pairs */
     int count = 0;
 
     if (self_interaction) {
-        count += N;  
+        count += natoms;  
     }
 
-    for (int i = 0; i < N; i++) {
-
-        for (int j = i+1; j < N; j++){
-
-            double dist = distance_sq_pbc(i, j, position, config->pbc, config->cell);
-
+    for (int i = 0; i < natoms; i++) {
+        for (int j = i + 1; j < natoms; j++) {
+            double dist_sq = distance_sq_pbc(i, j, positions, pbc, cell);
             double cutoff_sum = get_cutoff_sum(cutoff_spec, i, j);
 
-            if (dist <= cutoff_sum*cutoff_sum) {
+            if (dist_sq <= cutoff_sum * cutoff_sum) {
                 if (bothways) {
                     count += 2;
                 } else {
@@ -104,33 +140,30 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
         return nl;
     }
 
-
+    /* Allocate memory */
     nl.pairs = (Pair*)malloc(count * sizeof(Pair));
     if (nl.pairs == NULL) {
         return nl;
     }
     nl.count = count;
 
-
+    /* Second pass: fill pairs */
     int idx = 0;
 
     if (self_interaction) {
-        for (int i = 0; i < N; i++) {
+        for (int i = 0; i < natoms; i++) {
             nl.pairs[idx].i = i;
             nl.pairs[idx].j = i;
             idx++;
         }
     }
 
-    for (int i = 0; i < N; i++) {
-
-        for (int j = i+1; j < N; j++) {
-
-            double dist = distance_sq_pbc(i, j, position, config->pbc, config->cell);
-
+    for (int i = 0; i < natoms; i++) {
+        for (int j = i + 1; j < natoms; j++) {
+            double dist_sq = distance_sq_pbc(i, j, positions, pbc, cell);
             double cutoff_sum = get_cutoff_sum(cutoff_spec, i, j);
             
-            if (dist <= cutoff_sum*cutoff_sum) {
+            if (dist_sq <= cutoff_sum * cutoff_sum) {
                 nl.pairs[idx].i = i;
                 nl.pairs[idx].j = j;
                 idx++;
@@ -141,19 +174,18 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
                     idx++;
                 }
             }
-
         }
     }
-
 
     return nl;
 }
 
-
-NeighborListObject* neighborlist_create(const double *cutoffs, int natoms, 
+/**
+ * @brief Create a new NeighborListObject
+ */
+NeighborListObject* neighborlist_create(const double *cutoffs, int natoms,
                                         int self_interaction, int bothways,
                                         double skin, int sorted) {
-
     NeighborListObject *nl = (NeighborListObject*)malloc(sizeof(NeighborListObject));
     if (nl == NULL) {
         return NULL;
@@ -168,7 +200,6 @@ NeighborListObject* neighborlist_create(const double *cutoffs, int natoms,
         nl->cutoffs[i] = cutoffs[i];
     }
 
-
     nl->natoms = natoms;
     nl->self_interaction = self_interaction;
     nl->bothways = bothways;
@@ -178,19 +209,20 @@ NeighborListObject* neighborlist_create(const double *cutoffs, int natoms,
     nl->nupdates = 0;
     nl->last_positions = NULL;
 
-
+    /* Initialize saved state with defaults */
     for (int i = 0; i < 3; i++) {
         nl->last_pbc[i] = 0;
     }
     for (int i = 0; i < 9; i++) {
         nl->last_cell[i] = (i % 4 == 0) ? 1.0 : 0.0;  
     }
-    
 
     return nl;
 }
 
-
+/**
+ * @brief Free a NeighborListObject
+ */
 void neighborlist_free(NeighborListObject *nl) {
     if (nl == NULL) return;
     
@@ -210,21 +242,24 @@ void neighborlist_free(NeighborListObject *nl) {
     free(nl);
 }
 
-
-void neighborlist_update(NeighborListObject *nl, const double *positions, 
+/**
+ * @brief Update neighbor list with lazy rebuild logic
+ */
+void neighborlist_update(NeighborListObject *nl, const double *positions,
                          const int *pbc, const double *cell) {
     if (nl == NULL) return;
-
 
     int need_rebuild = 0;
 
     if (nl->nupdates == 0) {
         need_rebuild = 1;
     } else {
+        /* Check if PBC changed */
         if (pbc[0] != nl->last_pbc[0] || pbc[1] != nl->last_pbc[1] || pbc[2] != nl->last_pbc[2]) {
             need_rebuild = 1;
         }
 
+        /* Check if cell changed */
         if (!need_rebuild) {
             for (int k = 0; k < 9; k++) {
                 if (cell[k] != nl->last_cell[k]) {
@@ -234,6 +269,7 @@ void neighborlist_update(NeighborListObject *nl, const double *positions,
             }
         }
 
+        /* Check if any atom moved more than skin */
         if (!need_rebuild && nl->last_positions != NULL) {
             double max_move_sq = 0.0;
             for (int i = 0; i < nl->natoms; i++) {
@@ -249,14 +285,13 @@ void neighborlist_update(NeighborListObject *nl, const double *positions,
         }
     }
 
-
+    /* Use cached result if no rebuild needed */
     if (!need_rebuild) {
         return;
     }
 
-
+    /* Rebuild neighbor list */
     CutoffSpec cutoff_spec = cutoff_per_atom(nl->cutoffs);
-
 
     NeighborListConfig config = {
         .cutoff_spec = &cutoff_spec,
@@ -266,20 +301,18 @@ void neighborlist_update(NeighborListObject *nl, const double *positions,
         .cell = {cell[0], cell[1], cell[2], cell[3], cell[4], cell[5], cell[6], cell[7], cell[8]}
     };
 
-
     NeighborList new_nl = primitive_neighbor_list(positions, nl->natoms, &config);
 
-
+    /* Sort if requested */
     if (nl->sorted && new_nl.count > 0) {
         qsort(new_nl.pairs, new_nl.count, sizeof(Pair), compare_pairs);
     }
 
-
+    /* Replace cached result */
     if (nl->cached_nl != NULL) {
         free_neighbor_list(nl->cached_nl);
         free(nl->cached_nl);
     }
-
 
     nl->cached_nl = (NeighborList*)malloc(sizeof(NeighborList));
     if (nl->cached_nl == NULL) {
@@ -288,7 +321,7 @@ void neighborlist_update(NeighborListObject *nl, const double *positions,
     }
     *nl->cached_nl = new_nl;
 
-
+    /* Save positions for next skin check */
     if (nl->last_positions != NULL) {
         free(nl->last_positions);
     }
@@ -299,7 +332,7 @@ void neighborlist_update(NeighborListObject *nl, const double *positions,
         }
     }
 
-
+    /* Save PBC and cell for next update */
     for (int i = 0; i < 3; i++) {
         nl->last_pbc[i] = pbc[i];
     }
@@ -307,16 +340,16 @@ void neighborlist_update(NeighborListObject *nl, const double *positions,
         nl->last_cell[i] = cell[i];
     }
 
-
     nl->nupdates++;
 }
 
-
+/**
+ * @brief Get neighbors for a specific atom
+ */
 AtomNeighbors neighborlist_get_neighbors(NeighborListObject *nl, int atom) {
     AtomNeighbors result;
     result.indices = NULL;
     result.count = 0;
-
 
     if (nl == NULL || nl->cached_nl == NULL || nl->cached_nl->pairs == NULL) {
         return result;
@@ -324,7 +357,7 @@ AtomNeighbors neighborlist_get_neighbors(NeighborListObject *nl, int atom) {
 
     NeighborList *nlist = nl->cached_nl;
 
-
+    /* Count neighbors */
     int count = 0;
     for (int k = 0; k < nlist->count; k++) {
         if (nlist->pairs[k].i == atom) {
@@ -336,7 +369,7 @@ AtomNeighbors neighborlist_get_neighbors(NeighborListObject *nl, int atom) {
         return result;
     }
 
-
+    /* Allocate and fill */
     result.indices = (int*)malloc(count * sizeof(int));
     if (result.indices == NULL) {
         return result;
@@ -353,7 +386,9 @@ AtomNeighbors neighborlist_get_neighbors(NeighborListObject *nl, int atom) {
     return result;
 }
 
-
+/**
+ * @brief Free AtomNeighbors structure
+ */
 void atom_neighbors_free(AtomNeighbors *neighbors) {
     if (neighbors->indices != NULL) {
         free(neighbors->indices);
@@ -362,12 +397,16 @@ void atom_neighbors_free(AtomNeighbors *neighbors) {
     neighbors->count = 0;
 }
 
-
+/**
+ * @brief Get number of updates performed
+ */
 int neighborlist_get_nupdates(NeighborListObject *nl) {
     return nl->nupdates;
 }
 
-
+/**
+ * @brief Free NeighborList structure
+ */
 void free_neighbor_list(NeighborList *nl) {
     if (nl->pairs != NULL) {
         free(nl->pairs);
