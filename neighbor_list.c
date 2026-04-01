@@ -4,6 +4,14 @@
 #include "neighbor_list.h"
 
 
+static int compare_pairs(const void *a, const void *b) {
+    const Pair *pa = (const Pair*)a;
+    const Pair *pb = (const Pair*)b;
+    if (pa->i != pb->i) return pa->i - pb->i;
+    return pa->j - pb->j;
+}
+
+
 CutoffSpec cutoff_global(double value) {
     CutoffSpec spec;
     spec.type = CUTOFF_GLOBAL;
@@ -142,7 +150,9 @@ NeighborList primitive_neighbor_list(const double *position, int N, const Neighb
 }
 
 
-NeighborListObject* neighborlist_create(const double *cutoffs, int natoms, int self_interaction, int bothways) {
+NeighborListObject* neighborlist_create(const double *cutoffs, int natoms, 
+                                        int self_interaction, int bothways,
+                                        double skin, int sorted) {
 
     NeighborListObject *nl = (NeighborListObject*)malloc(sizeof(NeighborListObject));
     if (nl == NULL) {
@@ -162,6 +172,8 @@ NeighborListObject* neighborlist_create(const double *cutoffs, int natoms, int s
     nl->natoms = natoms;
     nl->self_interaction = self_interaction;
     nl->bothways = bothways;
+    nl->skin = skin;
+    nl->sorted = sorted;
     nl->cached_nl = NULL;
     nl->nupdates = 0;
     nl->last_positions = NULL;
@@ -199,8 +211,46 @@ void neighborlist_free(NeighborListObject *nl) {
 }
 
 
-void neighborlist_update(NeighborListObject *nl, const double *positions, const int *pbc, const double *cell) {
-    if (nl == NULL) {
+void neighborlist_update(NeighborListObject *nl, const double *positions, 
+                         const int *pbc, const double *cell) {
+    if (nl == NULL) return;
+
+
+    int need_rebuild = 0;
+
+    if (nl->nupdates == 0) {
+        need_rebuild = 1;
+    } else {
+        if (pbc[0] != nl->last_pbc[0] || pbc[1] != nl->last_pbc[1] || pbc[2] != nl->last_pbc[2]) {
+            need_rebuild = 1;
+        }
+
+        if (!need_rebuild) {
+            for (int k = 0; k < 9; k++) {
+                if (cell[k] != nl->last_cell[k]) {
+                    need_rebuild = 1;
+                    break;
+                }
+            }
+        }
+
+        if (!need_rebuild && nl->last_positions != NULL) {
+            double max_move_sq = 0.0;
+            for (int i = 0; i < nl->natoms; i++) {
+                double dx = positions[3*i] - nl->last_positions[3*i];
+                double dy = positions[3*i+1] - nl->last_positions[3*i+1];
+                double dz = positions[3*i+2] - nl->last_positions[3*i+2];
+                double move_sq = dx*dx + dy*dy + dz*dz;
+                if (move_sq > max_move_sq) max_move_sq = move_sq;
+            }
+            if (sqrt(max_move_sq) > nl->skin) {
+                need_rebuild = 1;
+            }
+        }
+    }
+
+
+    if (!need_rebuild) {
         return;
     }
 
@@ -220,6 +270,11 @@ void neighborlist_update(NeighborListObject *nl, const double *positions, const 
     NeighborList new_nl = primitive_neighbor_list(positions, nl->natoms, &config);
 
 
+    if (nl->sorted && new_nl.count > 0) {
+        qsort(new_nl.pairs, new_nl.count, sizeof(Pair), compare_pairs);
+    }
+
+
     if (nl->cached_nl != NULL) {
         free_neighbor_list(nl->cached_nl);
         free(nl->cached_nl);
@@ -228,9 +283,21 @@ void neighborlist_update(NeighborListObject *nl, const double *positions, const 
 
     nl->cached_nl = (NeighborList*)malloc(sizeof(NeighborList));
     if (nl->cached_nl == NULL) {
+        free_neighbor_list(&new_nl);
         return;
     }
     *nl->cached_nl = new_nl;
+
+
+    if (nl->last_positions != NULL) {
+        free(nl->last_positions);
+    }
+    nl->last_positions = (double*)malloc(3 * nl->natoms * sizeof(double));
+    if (nl->last_positions != NULL) {
+        for (int i = 0; i < 3 * nl->natoms; i++) {
+            nl->last_positions[i] = positions[i];
+        }
+    }
 
 
     for (int i = 0; i < 3; i++) {

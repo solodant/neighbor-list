@@ -62,6 +62,8 @@ typedef struct {
     int natoms;
     int self_interaction;
     int bothways;
+    double skin;
+    int sorted;
 
 
     NeighborList *cached_nl;
@@ -74,13 +76,13 @@ typedef struct {
 } NeighborListObject;
 
 
-NeighborListObject* neighborlist_create(const double *cutoffs, int natoms, int self_interaction, int bothways);
+NeighborListObject* neighborlist_create(const double *cutoffs, int natoms, 
+                                        int self_interaction, int bothways,
+                                        double skin, int sorted);
 
 AtomNeighbors neighborlist_get_neighbors(NeighborListObject *nl, int atom);
 
-
 int neighborlist_get_nupdates(NeighborListObject *nl);
-
 
 void neighborlist_update(NeighborListObject *nl, const double *positions, const int *pbc, const double *cell);
 
